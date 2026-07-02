@@ -1,0 +1,7 @@
+# Bỏ qua thư mục Python cache
+__pycache__/
+
+# Bỏ qua các file biên dịch của Python
+*.pyc
+*.pyo
+*.pyd
