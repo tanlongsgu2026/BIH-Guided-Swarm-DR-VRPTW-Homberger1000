@@ -32,6 +32,7 @@ def save_routes(path: Path, instance_name: str, algorithm: str, routes: List[Lis
 
 
 def run_algorithm(inst, algorithm: str, runtime_limit: float, seed: int, bih_initial=None):
+    # Vẫn giữ lại cấu trúc gọi hàm gốc để không ảnh hưởng luồng thuật toán
     if algorithm == "BIH":
         return bih_initial if bih_initial is not None else multi_start_bih(inst)
     if algorithm == "ACO":
@@ -48,10 +49,13 @@ def run_algorithm(inst, algorithm: str, runtime_limit: float, seed: int, bih_ini
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run one assigned BIH-guided swarm optimization experiment on Homberger1000 VRPTW.")
+    parser = argparse.ArgumentParser(
+        description="Run one assigned BIH-guided swarm optimization experiment on Homberger1000 VRPTW.")
     parser.add_argument("--zip", default=str(DEFAULT_ZIP), help="Path to homberger_1000_customer_instances.zip")
-    parser.add_argument("--algorithms", nargs="+", default=["BIH"], help="Algorithms to run. Student version defaults to BIH only; use wrapper scripts for each assigned algorithm.")
-    parser.add_argument("--runtime-limit", type=float, default=90.0, help="Seconds per instance for each stochastic algorithm; default BT setting is 90")
+    parser.add_argument("--algorithms", nargs="+", default=[],
+                        help="Algorithms to run. Student version defaults to BIH only; use wrapper scripts for each assigned algorithm.")
+    parser.add_argument("--runtime-limit", type=float, default=90.0,
+                        help="Seconds per instance for each stochastic algorithm; default BT setting is 90")
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--max-instances", type=int, default=None)
     parser.add_argument("--pattern", default=None, help="Optional instance-name filter, e.g. C1_10 or R1")
@@ -59,12 +63,10 @@ def main():
     parser.add_argument("--save-routes", action="store_true")
     args = parser.parse_args()
 
-    # Mandatory BIH-first policy: every experiment computes BIH before any swarm method.
-    # If the user asks for only ACO/GWO/ABC/DR, BIH is automatically inserted as the first row
-    # so that every stochastic method is initialized and compared against the same BIH baseline.
+    # ĐÃ BỎ CHUỖI ÉP BUỘC ["BIH"] Ở ĐÂY
     seen = set()
     ordered_algorithms = []
-    for alg in ["BIH"] + list(args.algorithms):
+    for alg in list(args.algorithms):
         if alg not in seen:
             ordered_algorithms.append(alg)
             seen.add(alg)
@@ -79,14 +81,22 @@ def main():
     for idx, member in enumerate(instances, start=1):
         inst = read_instance_from_zip(zip_path, member)
         print(f"[{idx}/{len(instances)}] {inst.name}")
-        print("  Running mandatory BIH baseline first...")
-        t_bih = time.time()
-        bih_initial = multi_start_bih(inst)
-        bih_runtime = time.time() - t_bih
+
+        # 1. CHỈ NẠP NGHIỆM BIH TỪ JSON (KHÔNG GHI CSV NỮA)
+        json_file = DEFAULT_RESULTS / "routes" / f"{inst.name}_BIH.json"
+        if json_file.exists():
+            with json_file.open("r", encoding="utf-8") as f:
+                bih_initial = json.load(f)
+            print(f"  [+] Đã nạp thành công nghiệm khởi tạo từ {json_file.name}")
+        else:
+            print("  [!] Không tìm thấy file JSON, tiến hành chạy lại BIH mặc định (Fallback)...")
+            bih_initial = multi_start_bih(inst)
+
+        # 2. CHẠY THUẬT TOÁN BẦY ĐÀN
         for alg in args.algorithms:
             t0 = time.time()
             routes = run_algorithm(inst, alg, runtime_limit=args.runtime_limit, seed=args.seed, bih_initial=bih_initial)
-            runtime = bih_runtime if alg == "BIH" else time.time() - t0
+            runtime = time.time() - t0
             ev = evaluate_solution(inst, routes)
             row = {
                 "instance": inst.name,
@@ -102,8 +112,10 @@ def main():
             }
             print("  ", row)
             rows.append(row)
+
+            # 3. LƯU ROUTES NẾU CÓ CỜ
             if args.save_routes:
-                save_routes(DEFAULT_RESULTS / "routes" / f"{inst.name}_{alg}.csv", inst.name, alg, routes)
+                save_routes(DEFAULT_RESULTS / "routes" / alg / f"{inst.name}_{alg}.csv", inst.name, alg, routes)
 
     with out_path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()) if rows else [])
